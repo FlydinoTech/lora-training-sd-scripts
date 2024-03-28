@@ -1,3 +1,4 @@
+import logging
 import argparse
 import csv
 import os
@@ -13,7 +14,6 @@ from tqdm import tqdm
 import library.train_util as train_util
 from library.utils import setup_logging
 setup_logging()
-import logging
 logger = logging.getLogger(__name__)
 
 # from wd14 tagger
@@ -28,6 +28,67 @@ SUB_DIR_FILES = ["variables.data-00000-of-00001", "variables.index"]
 CSV_FILE = FILES[-1]
 
 
+def add_pre_postfix(
+    folder: str = "",
+    prefix: str = "",
+    postfix: str = "",
+    caption_file_ext: str = ".caption",
+) -> None:
+    """
+    Add prefix and/or postfix to the content of caption files within a folder.
+    If no caption files are found, create one with the requested prefix and/or postfix.
+
+    Args:
+        folder (str): Path to the folder containing caption files.
+        prefix (str, optional): Prefix to add to the content of the caption files.
+        postfix (str, optional): Postfix to add to the content of the caption files.
+        caption_file_ext (str, optional): Extension of the caption files.
+    """
+
+    # If neither prefix nor postfix is provided, return early
+    if prefix == "" and postfix == "":
+        return
+
+    # Define the image file extensions to filter
+    image_extensions = (".jpg", ".jpeg", ".png", ".webp")
+
+    # List all image files in the folder
+    image_files = [
+        f for f in os.listdir(folder) if f.lower().endswith(image_extensions)
+    ]
+
+    # Iterate over the list of image files
+    for image_file in image_files:
+        # Construct the caption file name by appending the caption file extension to the image file name
+        caption_file_name = os.path.splitext(image_file)[0] + caption_file_ext
+        # Construct the full path to the caption file
+        caption_file_path = os.path.join(folder, caption_file_name)
+
+        # Check if the caption file does not exist
+        if not os.path.exists(caption_file_path):
+            # Create a new caption file with the specified prefix and/or postfix
+            with open(caption_file_path, "w", encoding="utf8") as f:
+                # Determine the separator based on whether both prefix and postfix are provided
+                separator = " " if prefix and postfix else ""
+                f.write(f"{prefix}{separator}{postfix}")
+        else:
+            # Open the existing caption file for reading and writing
+            with open(caption_file_path, "r+", encoding="utf8") as f:
+                # Read the content of the caption file, stripping any trailing whitespace
+                content = f.read().rstrip()
+                # Move the file pointer to the beginning of the file
+                f.seek(0, 0)
+
+                # Determine the separator based on whether only prefix is provided
+                prefix_separator = " " if prefix else ""
+                # Determine the separator based on whether only postfix is provided
+                postfix_separator = " " if postfix else ""
+                # Write the updated content to the caption file, adding prefix and/or postfix
+                f.write(
+                    f"{prefix}{prefix_separator}{content}{postfix_separator}{postfix}"
+                )
+
+
 def preprocess_image(image):
     image = np.array(image)
     image = image[:, :, ::-1]  # RGB->BGR
@@ -38,7 +99,8 @@ def preprocess_image(image):
     pad_y = size - image.shape[0]
     pad_l = pad_x // 2
     pad_t = pad_y // 2
-    image = np.pad(image, ((pad_t, pad_y - pad_t), (pad_l, pad_x - pad_l), (0, 0)), mode="constant", constant_values=255)
+    image = np.pad(image, ((pad_t, pad_y - pad_t), (pad_l, pad_x -
+                   pad_l), (0, 0)), mode="constant", constant_values=255)
 
     interp = cv2.INTER_AREA if size > IMAGE_SIZE else cv2.INTER_LANCZOS4
     image = cv2.resize(image, (IMAGE_SIZE, IMAGE_SIZE), interpolation=interp)
@@ -62,7 +124,8 @@ class ImageLoadingPrepDataset(torch.utils.data.Dataset):
             image = preprocess_image(image)
             tensor = torch.tensor(image)
         except Exception as e:
-            logger.error(f"Could not load image path / 画像を読み込めません: {img_path}, error: {e}")
+            logger.error(
+                f"Could not load image path / 画像を読み込めません: {img_path}, error: {e}")
             return None
 
         return (tensor, img_path)
@@ -83,12 +146,14 @@ def main(args):
     # depreacatedの警告が出るけどなくなったらその時
     # https://github.com/toriato/stable-diffusion-webui-wd14-tagger/issues/22
     if not os.path.exists(args.model_dir) or args.force_download:
-        logger.info(f"downloading wd14 tagger model from hf_hub. id: {args.repo_id}")
+        logger.info(
+            f"downloading wd14 tagger model from hf_hub. id: {args.repo_id}")
         files = FILES
         if args.onnx:
             files += FILES_ONNX
         for file in files:
-            hf_hub_download(args.repo_id, file, cache_dir=args.model_dir, force_download=True, force_filename=file)
+            hf_hub_download(args.repo_id, file, cache_dir=args.model_dir,
+                            force_download=True, force_filename=file)
         for file in SUB_DIR_FILES:
             hf_hub_download(
                 args.repo_id,
@@ -151,7 +216,8 @@ def main(args):
         l = [row for row in reader]
         header = l[0]  # tag_id,name,category,count
         rows = l[1:]
-    assert header[0] == "tag_id" and header[1] == "name" and header[2] == "category", f"unexpected csv format: {header}"
+    assert header[0] == "tag_id" and header[1] == "name" and header[
+        2] == "category", f"unexpected csv format: {header}"
 
     general_tags = [row[1] for row in rows[1:] if row[2] == "0"]
     character_tags = [row[1] for row in rows[1:] if row[2] == "4"]
@@ -159,7 +225,8 @@ def main(args):
     # 画像を読み込む
 
     train_data_dir_path = Path(args.train_data_dir)
-    image_paths = train_util.glob_images_pathlib(train_data_dir_path, args.recursive)
+    image_paths = train_util.glob_images_pathlib(
+        train_data_dir_path, args.recursive)
     logger.info(f"found {len(image_paths)} images.")
 
     tag_freq = {}
@@ -173,8 +240,10 @@ def main(args):
 
         if args.onnx:
             if len(imgs) < args.batch_size:
-                imgs = np.concatenate([imgs, np.zeros((args.batch_size - len(imgs), IMAGE_SIZE, IMAGE_SIZE, 3))], axis=0)
-            probs = ort_sess.run(None, {input_name: imgs})[0]  # onnx output numpy
+                imgs = np.concatenate([imgs, np.zeros(
+                    (args.batch_size - len(imgs), IMAGE_SIZE, IMAGE_SIZE, 3))], axis=0)
+            probs = ort_sess.run(None, {input_name: imgs})[
+                0]  # onnx output numpy
             probs = probs[: len(path_imgs)]
         else:
             probs = model(imgs, training=False)
@@ -195,7 +264,8 @@ def main(args):
             for i, p in enumerate(prob[4:]):
                 if i < len(general_tags) and p >= args.general_threshold:
                     tag_name = general_tags[i]
-                    if args.remove_underscore and len(tag_name) > 3:  # ignore emoji tags like >_< and ^_^
+                    # ignore emoji tags like >_< and ^_^
+                    if args.remove_underscore and len(tag_name) > 3:
                         tag_name = tag_name.replace("_", " ")
 
                     if tag_name not in undesired_tags:
@@ -214,11 +284,13 @@ def main(args):
 
             # 先頭のカンマを取る
             if len(general_tag_text) > 0:
-                general_tag_text = general_tag_text[len(caption_separator) :]
+                general_tag_text = general_tag_text[len(caption_separator):]
             if len(character_tag_text) > 0:
-                character_tag_text = character_tag_text[len(caption_separator) :]
+                character_tag_text = character_tag_text[len(
+                    caption_separator):]
 
-            caption_file = os.path.splitext(image_path)[0] + args.caption_extension
+            caption_file = os.path.splitext(
+                image_path)[0] + args.caption_extension
 
             tag_text = caption_separator.join(combined_tags)
 
@@ -230,10 +302,12 @@ def main(args):
                         existing_content = f.read().strip("\n")  # Remove newlines
 
                     # Split the content into tags and store them in a list
-                    existing_tags = [tag.strip() for tag in existing_content.split(stripped_caption_separator) if tag.strip()]
+                    existing_tags = [tag.strip() for tag in existing_content.split(
+                        stripped_caption_separator) if tag.strip()]
 
                     # Check and remove repeating tags in tag_text
-                    new_tags = [tag for tag in combined_tags if tag not in existing_tags]
+                    new_tags = [
+                        tag for tag in combined_tags if tag not in existing_tags]
 
                     # Create new tag_text
                     tag_text = caption_separator.join(existing_tags + new_tags)
@@ -276,21 +350,25 @@ def main(args):
                         image = image.convert("RGB")
                     image = preprocess_image(image)
                 except Exception as e:
-                    logger.error(f"Could not load image path / 画像を読み込めません: {image_path}, error: {e}")
+                    logger.error(
+                        f"Could not load image path / 画像を読み込めません: {image_path}, error: {e}")
                     continue
             b_imgs.append((image_path, image))
 
             if len(b_imgs) >= args.batch_size:
-                b_imgs = [(str(image_path), image) for image_path, image in b_imgs]  # Convert image_path to string
+                b_imgs = [(str(image_path), image) for image_path,
+                          image in b_imgs]  # Convert image_path to string
                 run_batch(b_imgs)
                 b_imgs.clear()
 
     if len(b_imgs) > 0:
-        b_imgs = [(str(image_path), image) for image_path, image in b_imgs]  # Convert image_path to string
+        b_imgs = [(str(image_path), image)
+                  for image_path, image in b_imgs]  # Convert image_path to string
         run_batch(b_imgs)
 
     if args.frequency_tags:
-        sorted_tags = sorted(tag_freq.items(), key=lambda x: x[1], reverse=True)
+        sorted_tags = sorted(
+            tag_freq.items(), key=lambda x: x[1], reverse=True)
         print("Tag frequencies:")
         for tag, freq in sorted_tags:
             print(f"{tag}: {freq}")
@@ -300,7 +378,8 @@ def main(args):
 
 def setup_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("train_data_dir", type=str, help="directory for train images / 学習画像データのディレクトリ")
+    parser.add_argument("train_data_dir", type=str,
+                        help="directory for train images / 学習画像データのディレクトリ")
     parser.add_argument(
         "--repo_id",
         type=str,
@@ -316,7 +395,8 @@ def setup_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force_download", action="store_true", help="force downloading wd14 tagger models / wd14 taggerのモデルを再ダウンロードします"
     )
-    parser.add_argument("--batch_size", type=int, default=1, help="batch size in inference / 推論時のバッチサイズ")
+    parser.add_argument("--batch_size", type=int, default=1,
+                        help="batch size in inference / 推論時のバッチサイズ")
     parser.add_argument(
         "--max_data_loader_n_workers",
         type=int,
@@ -329,8 +409,10 @@ def setup_parser() -> argparse.ArgumentParser:
         default=None,
         help="extension of caption file (for backward compatibility) / 出力されるキャプションファイルの拡張子（スペルミスしていたのを残してあります）",
     )
-    parser.add_argument("--caption_extension", type=str, default=".txt", help="extension of caption file / 出力されるキャプションファイルの拡張子")
-    parser.add_argument("--thresh", type=float, default=0.35, help="threshold of confidence to add a tag / タグを追加するか判定する閾値")
+    parser.add_argument("--caption_extension", type=str, default=".txt",
+                        help="extension of caption file / 出力されるキャプションファイルの拡張子")
+    parser.add_argument("--thresh", type=float, default=0.35,
+                        help="threshold of confidence to add a tag / タグを追加するか判定する閾値")
     parser.add_argument(
         "--general_threshold",
         type=float,
@@ -343,7 +425,8 @@ def setup_parser() -> argparse.ArgumentParser:
         default=None,
         help="threshold of confidence to add a tag for character category, same as --thres if omitted / characterカテゴリのタグを追加するための確信度の閾値、省略時は --thresh と同じ",
     )
-    parser.add_argument("--recursive", action="store_true", help="search for images in subfolders recursively / サブフォルダを再帰的に検索する")
+    parser.add_argument("--recursive", action="store_true",
+                        help="search for images in subfolders recursively / サブフォルダを再帰的に検索する")
     parser.add_argument(
         "--remove_underscore",
         action="store_true",
@@ -356,14 +439,24 @@ def setup_parser() -> argparse.ArgumentParser:
         default="",
         help="comma-separated list of undesired tags to remove from the output / 出力から除外したいタグのカンマ区切りのリスト",
     )
-    parser.add_argument("--frequency_tags", action="store_true", help="Show frequency of tags for images / 画像ごとのタグの出現頻度を表示する")
-    parser.add_argument("--onnx", action="store_true", help="use onnx model for inference / onnxモデルを推論に使用する")
-    parser.add_argument("--append_tags", action="store_true", help="Append captions instead of overwriting / 上書きではなくキャプションを追記する")
+    parser.add_argument("--frequency_tags", action="store_true",
+                        help="Show frequency of tags for images / 画像ごとのタグの出現頻度を表示する")
+    parser.add_argument("--onnx", action="store_true",
+                        help="use onnx model for inference / onnxモデルを推論に使用する")
+    parser.add_argument("--append_tags", action="store_true",
+                        help="Append captions instead of overwriting / 上書きではなくキャプションを追記する")
     parser.add_argument(
         "--caption_separator",
         type=str,
         default=", ",
         help="Separator for captions, include space if needed / キャプションの区切り文字、必要ならスペースを含めてください",
+    )
+
+    parser.add_argument(
+        "--prefix_caption",
+        type=str,
+        default="",
+        help="Prefix caption",
     )
 
     return parser
@@ -384,3 +477,6 @@ if __name__ == "__main__":
         args.character_threshold = args.thresh
 
     main(args)
+
+    add_pre_postfix(args.train_data_dir,
+                    prefix=args.prefix_caption, caption_file_ext=".txt")
